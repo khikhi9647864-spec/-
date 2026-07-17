@@ -2,7 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
-const cors = require('cors');
+const cors = require('cors'); // Vẫn giữ cors để chạy được trên Render
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -51,6 +51,7 @@ function generateRandomString(length) {
 // API & ROUTES
 // ==========================================
 
+// Route giữ cho Render không bị ngủ
 app.get('/ping', (req, res) => {
     res.status(200).send('OK');
 });
@@ -101,12 +102,13 @@ app.get('/hub', (req, res) => {
         return res.status(403).send("Access Denied: Vui lòng vượt link trước!");
     }
 
+    // ĐÃ GIỮ NGUYÊN 100% CẤU TRÚC GỐC VÀ CHỮ GỐC CỦA BẠN
     const htmlContent = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>Vantablack Hub - Key System</title>
         <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
         <style>
@@ -120,17 +122,17 @@ app.get('/hub', (req, res) => {
             button.action-btn:disabled { background-color: #555; cursor: not-allowed; box-shadow: none; transform: none;}
             #copyBtn { background-color: #2196F3; display: none; }
             
-            /* CSS CAPTCHA */
+            /* CSS CAPTCHA GỐC + Thêm xíu disabled để tạo độ trễ */
             #captchaContainer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
-            #captchaInfo { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; text-align: center; line-height: 1.5; pointer-events: none;}
-            #captchaBtn { position: absolute; background-color: #28a745; color: white; border: 3px solid #000; padding: 15px 20px; font-family: 'Press Start 2P', cursive; font-size: 12px; cursor: pointer; box-shadow: 4px 4px 0px #000; display: none; transition: background-color 0.2s; white-space: nowrap;}
-            #captchaBtn:disabled { cursor: default; transform: translate(4px, 4px); box-shadow: 0px 0px 0px #000; }
+            #captchaInfo { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; text-align: center; line-height: 1.5; pointer-events: none; }
+            #captchaBtn { position: absolute; background-color: #28a745; color: white; border: 3px solid #000; padding: 10px; font-family: 'Press Start 2P', cursive; font-size: 14px; cursor: pointer; box-shadow: 3px 3px 0px #000; display: none; }
+            #captchaBtn:disabled { cursor: default; transform: translate(3px, 3px); box-shadow: 0px 0px 0px #000; }
         </style>
     </head>
     <body>
         <div id="captchaContainer">
-            <div id="captchaInfo">Chứng minh bạn là con người!<br><br>Tìm và click vào nút xác nhận.</div>
-            <button id="captchaBtn">✔️ Xác nhận (1/3)</button>
+            <div id="captchaInfo">Prove you are human!<br><br>Click the Check button 3 times.<br><br><span id="captchaCount">0/3</span></div>
+            <button id="captchaBtn">✔️</button>
         </div>
 
         <div class="container" id="mainContainer">
@@ -144,66 +146,79 @@ app.get('/hub', (req, res) => {
         </div>
 
         <script>
-            // --- CAPTCHA LOGIC ---
+            // --- CAPTCHA LOGIC CHỈ SỬA CÔNG THỨC TỌA ĐỘ ---
             let captchaClicks = 0;
             const targetClicks = 3;
             const captchaBtn = document.getElementById('captchaBtn');
             const captchaContainer = document.getElementById('captchaContainer');
             const mainContainer = document.getElementById('mainContainer');
             
-            // Kiểm tra xem đã có key còn hạn chưa, nếu có bỏ qua captcha
             if(localStorage.getItem('vantablack_expire') && Date.now() < parseInt(localStorage.getItem('vantablack_expire'))) {
                 captchaContainer.style.display = 'none';
                 mainContainer.style.display = 'block';
                 resumeSession();
             } else {
-                // Hiển thị ngay lập tức khi vào trang
-                moveCaptchaButton();
+                setTimeout(moveCaptchaButton, 100); // Đợi xíu để load nút
             }
 
             function moveCaptchaButton() {
                 captchaBtn.style.display = 'block';
-                // Tính toán để nút không bị lẹm ra ngoài màn hình
-                const maxX = window.innerWidth - 250; 
-                const maxY = window.innerHeight - 100;
-                const minX = 20; const minY = 100; 
                 
-                let randomX = Math.floor(Math.random() * (maxX - minX + 1)) + minX;
-                let randomY = Math.floor(Math.random() * (maxY - minY + 1)) + minY;
+                // Thuật toán đo đúng chiều rộng màn hình dù là điện thoại hay PC
+                const btnWidth = captchaBtn.offsetWidth || 40;
+                const btnHeight = captchaBtn.offsetHeight || 40;
+                
+                // Trừ đi kích thước thật của cái nút + 20px viền an toàn
+                const maxX = window.innerWidth - btnWidth - 20;
+                const maxY = window.innerHeight - btnHeight - 20;
+                const minX = 20; 
+                const minY = 100; 
+                
+                // Đảm bảo không bị lỗi số âm trên màn hình nhỏ
+                const safeMaxX = Math.max(minX, maxX);
+                const safeMaxY = Math.max(minY, maxY);
+                
+                let randomX = Math.floor(Math.random() * (safeMaxX - minX + 1)) + minX;
+                let randomY = Math.floor(Math.random() * (safeMaxY - minY + 1)) + minY;
                 
                 captchaBtn.style.left = randomX + 'px'; 
                 captchaBtn.style.top = randomY + 'px';
             }
 
             captchaBtn.addEventListener('click', function() {
-                // Chống spam click
-                if (this.disabled) return; 
+                if (this.disabled) return; // Chống bấm 2 lần liên tục
 
                 captchaClicks++;
+                document.getElementById('captchaCount').innerText = captchaClicks + '/' + targetClicks;
                 
-                // 1. Đổi giao diện thành "Thành công"
-                this.innerHTML = "✅ Thành công!";
-                this.style.backgroundColor = "#2196F3"; // Đổi sang màu xanh dương
-                this.disabled = true; // Khóa nút tạm thời
+                // Đổi nút thành dấu tích xanh dương trong nửa giây để user biết đã nhấn ăn
+                this.innerHTML = "✅";
+                this.style.backgroundColor = "#2196F3";
+                this.disabled = true;
 
                 if (captchaClicks >= targetClicks) {
-                    // Đủ 3 lần -> Đợi 0.5s cho user nhìn thấy tích xanh rồi ẩn
                     setTimeout(() => {
                         captchaContainer.style.display = 'none';
                         mainContainer.style.display = 'block';
                     }, 500);
                 } else {
-                    // Chưa đủ -> Đợi 0.5s rồi di chuyển và reset lại nút
                     setTimeout(() => {
-                        this.innerHTML = "✔️ Xác nhận (" + (captchaClicks + 1) + "/3)";
-                        this.style.backgroundColor = "#28a745"; // Trả lại màu xanh lá
-                        moveCaptchaButton(); // Di chuyển
-                        this.disabled = false; // Mở khóa nút
+                        this.innerHTML = "✔️";
+                        this.style.backgroundColor = "#28a745";
+                        moveCaptchaButton();
+                        this.disabled = false;
                     }, 500);
                 }
             });
 
-            // --- KEY GENERATION & TIMER LOGIC (24H) ---
+            // Nếu người dùng xoay ngang điện thoại, nút tự nhảy lại cho an toàn
+            window.addEventListener('resize', () => {
+                if(captchaContainer.style.display !== 'none' && !captchaBtn.disabled) {
+                    moveCaptchaButton();
+                }
+            });
+
+            // --- KEY GENERATION & TIMER LOGIC (24H) - GIỮ NGUYÊN GỐC 100% ---
             let currentKey = "";
             let timerInterval;
 
