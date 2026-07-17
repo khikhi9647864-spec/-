@@ -1,38 +1,33 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
-const cookieParser = require('cookie-parser');
-const cors = require('cors'); // Thêm thư viện CORS
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 // ==========================================
-// CÀI ĐẶT BẢO MẬT & RENDER PROXY
+// BẢO MẬT CƠ BẢN
 // ==========================================
-app.use(helmet());
-app.use(cors());
-app.use(cookieParser());
+// Tắt tính năng tự chặn script của Helmet để code HTML chạy bình thường
+app.use(helmet({ contentSecurityPolicy: false })); 
+app.set('trust proxy', 1); // Bắt buộc cho Render để lấy đúng IP
 
-// BẮT BUỘC TRÊN RENDER: Để express-rate-limit nhận diện đúng IP thật của user
-// thay vì IP của Load Balancer trên Render.
-app.set('trust proxy', 1); 
-
-const generalLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000, max: 100,
-    message: "Hệ thống Anti-DDoS đang hoạt động. Vui lòng thử lại sau ít phút!"
+// Chống Spam F5 và DDoS
+const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 phút
+    max: 60, // Tối đa 60 request / phút / IP
+    message: "Bạn thao tác quá nhanh! Vui lòng chậm lại."
 });
-app.use('/', generalLimiter);
+app.use(limiter);
 
 // ==========================================
-// BỘ NHỚ LƯU TRỮ KEY & IP (HẠN 24 GIỜ)
+// BỘ NHỚ KEY (24 GIỜ)
 // ==========================================
 const activeKeys = new Map(); 
 const ipToKey = new Map();    
-// 24 Giờ = 24 * 60 * 60 * 1000 mili-giây
-const KEY_EXPIRATION_MS = 24 * 60 * 60 * 1000; 
+const KEY_EXPIRATION_MS = 24 * 60 * 60 * 1000; // 24 giờ
 
-// Dọn dẹp Key hết hạn (Chạy mỗi 15 phút)
+// Tự động xóa key rác sau mỗi 15 phút
 setInterval(() => {
     const now = Date.now();
     for (const [key, expiresAt] of activeKeys.entries()) {
@@ -43,8 +38,9 @@ setInterval(() => {
     }
 }, 15 * 60 * 1000);
 
+// Hàm tạo chuỗi 15 ký tự ngẫu nhiên
 function generateRandomString(length) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
     for (let i = 0; i < length; i++) {
         result += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -53,22 +49,10 @@ function generateRandomString(length) {
 }
 
 // ==========================================
-// API & ROUTES
+// GIAO DIỆN WEB HTML
 // ==========================================
-
-// ROUTE GIỮ STATE CHO RENDER (Chống sleep)
-app.get('/ping', (req, res) => {
-    res.status(200).send('OK');
-});
-
-// 1. TRANG CHỦ - CHUYỂN HƯỚNG THẲNG TỚI HUB (Đã bỏ vượt link)
 app.get('/', (req, res) => {
-    res.redirect('/hub');
-});
-
-// 2. TRANG TẠO KEY CHÍNH THỨC (Đã bỏ Captcha)
-app.get('/hub', (req, res) => {
-    const htmlContent = `
+    res.send(`
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -77,48 +61,100 @@ app.get('/hub', (req, res) => {
         <title>Vantablack Hub - Key System</title>
         <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
         <style>
-            body { background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: 'Press Start 2P', cursive; overflow: hidden; }
-            #mainContainer { text-align: center; background: rgba(0, 0, 0, 0.2); padding: 40px; border-radius: 10px; border: 4px solid #fff; }
-            h1 { color: #ffffff; font-size: 32px; text-shadow: 4px 4px 0px #000, 6px 6px 0px #444; margin-bottom: 40px; line-height: 1.5; }
-            .key-display { background-color: #fff; padding: 15px; font-size: 14px; color: #000; border: 4px solid #000; margin-bottom: 20px; min-width: 300px; height: 20px; word-wrap: break-word; }
-            .timer-display { color: #ffeb3b; font-size: 12px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; display: none;}
-            button.action-btn { background-color: #4CAF50; color: white; border: 4px solid #000; padding: 15px 20px; font-family: 'Press Start 2P', cursive; font-size: 12px; cursor: pointer; margin: 5px; box-shadow: 4px 4px 0px #000; transition: all 0.1s; }
-            button.action-btn:active:not(:disabled) { box-shadow: 0px 0px 0px #000; transform: translate(4px, 4px); }
-            button.action-btn:disabled { background-color: #555; cursor: not-allowed; box-shadow: none; transform: none;}
+            body {
+                background-color: #808080; /* Màu xám chủ đạo */
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                font-family: 'Press Start 2P', cursive;
+            }
+            .container {
+                text-align: center;
+                background: rgba(0, 0, 0, 0.2);
+                padding: 40px;
+                border-radius: 10px;
+                border: 4px solid #fff;
+            }
+            h1 {
+                color: #ffffff;
+                font-size: 32px;
+                /* Hiệu ứng 4D */
+                text-shadow: 4px 4px 0px #000, 6px 6px 0px #444; 
+                margin-bottom: 20px;
+                line-height: 1.5;
+            }
+            .key-display {
+                background-color: #fff;
+                padding: 15px;
+                font-size: 14px;
+                color: #000;
+                border: 4px solid #000;
+                margin-bottom: 20px;
+                min-width: 320px;
+                height: 20px;
+                word-wrap: break-word;
+            }
+            .timer-display {
+                color: #ffeb3b;
+                font-size: 12px;
+                margin-bottom: 20px;
+                text-shadow: 2px 2px 0px #000;
+                display: none;
+            }
+            button {
+                background-color: #4CAF50;
+                color: white;
+                border: 4px solid #000;
+                padding: 15px 20px;
+                font-family: 'Press Start 2P', cursive;
+                font-size: 12px;
+                cursor: pointer;
+                margin: 5px;
+                box-shadow: 4px 4px 0px #000;
+                transition: all 0.1s;
+            }
+            button:active {
+                box-shadow: 0px 0px 0px #000;
+                transform: translate(4px, 4px);
+            }
+            button:disabled {
+                background-color: #555;
+                cursor: not-allowed;
+                box-shadow: none;
+                transform: none;
+            }
             #copyBtn { background-color: #2196F3; display: none; }
         </style>
     </head>
     <body>
-        <div class="container" id="mainContainer">
+        <div class="container">
             <h1>Vantablack Hub</h1>
             <div id="timerBox" class="timer-display">Expires in: 24:00:00</div>
             <div id="keyBox" class="key-display">Click Generate...</div>
             <div>
-                <button id="genBtn" class="action-btn" onclick="generateKey()">Generate Key</button>
-                <button id="copyBtn" class="action-btn" onclick="copyKey()">Copy Key</button>
+                <button id="genBtn" onclick="generateKey()">Generate Key</button>
+                <button id="copyBtn" onclick="copyKey()">Copy Key</button>
             </div>
         </div>
 
         <script>
-            // Kiểm tra session cũ để khôi phục Key nếu còn hạn
-            if(localStorage.getItem('vantablack_expire') && Date.now() < parseInt(localStorage.getItem('vantablack_expire'))) {
-                resumeSession();
-            }
-
-            // --- KEY GENERATION & TIMER LOGIC (24H) ---
             let currentKey = "";
             let timerInterval;
 
-            function resumeSession() {
-                currentKey = localStorage.getItem('vantablack_key');
-                const expireTime = parseInt(localStorage.getItem('vantablack_expire'));
-                
-                document.getElementById('keyBox').innerText = currentKey;
-                document.getElementById('genBtn').style.display = 'none';
-                document.getElementById('copyBtn').style.display = 'inline-block';
-                document.getElementById('timerBox').style.display = 'block';
-                
-                startTimer(expireTime);
+            // Phục hồi session nếu load lại trang
+            if (localStorage.getItem('vantablack_key') && localStorage.getItem('vantablack_expire')) {
+                const expire = parseInt(localStorage.getItem('vantablack_expire'));
+                if (Date.now() < expire) {
+                    currentKey = localStorage.getItem('vantablack_key');
+                    document.getElementById('keyBox').innerText = currentKey;
+                    document.getElementById('genBtn').style.display = 'none';
+                    document.getElementById('copyBtn').style.display = 'inline-block';
+                    document.getElementById('timerBox').style.display = 'block';
+                    startTimer(expire);
+                }
             }
 
             async function generateKey() {
@@ -147,25 +183,19 @@ app.get('/hub', (req, res) => {
                         
                         startTimer(expireTime);
                     } else {
-                        keyBox.innerText = data.error || "Rate limit error!";
-                        setTimeout(() => {
-                            keyBox.innerText = "Click Generate...";
-                            genBtn.disabled = false;
-                        }, 3000);
+                        keyBox.innerText = "Error or Rate Limit!";
+                        genBtn.disabled = false;
                     }
                 } catch (err) {
                     keyBox.innerText = "Network Error!";
-                    setTimeout(() => {
-                        keyBox.innerText = "Click Generate...";
-                        genBtn.disabled = false;
-                    }, 3000);
+                    genBtn.disabled = false;
                 }
             }
 
             function startTimer(expireTime) {
                 const timerBox = document.getElementById('timerBox');
-                
                 clearInterval(timerInterval);
+                
                 timerInterval = setInterval(() => {
                     const now = Date.now();
                     const timeLeft = Math.floor((expireTime - now) / 1000);
@@ -189,12 +219,7 @@ app.get('/hub', (req, res) => {
             }
 
             function copyKey() {
-                if(!currentKey) {
-                    const btn = document.getElementById('copyBtn');
-                    btn.innerText = "No Key!";
-                    setTimeout(() => { btn.innerText = "Copy Key"; }, 1500);
-                    return;
-                }
+                if(!currentKey) return;
                 const textarea = document.createElement("textarea");
                 textarea.value = currentKey;
                 document.body.appendChild(textarea);
@@ -209,37 +234,36 @@ app.get('/hub', (req, res) => {
         </script>
     </body>
     </html>
-    `;
-    res.send(htmlContent);
+    `);
 });
 
-// 3. API TẠO KEY (KHÓA IP + HẸN GIỜ 24H)
-app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
-    // Nhờ trust proxy = 1, Express sẽ lấy đúng IP thật ở đây
+// ==========================================
+// API XỬ LÝ LẤY KEY VÀ KIỂM TRA
+// ==========================================
+app.get('/api/generate-key', (req, res) => {
+    // Chặn request từ tool
+    if (req.headers['x-vantablack-auth'] !== 'true_secure_request') {
+        return res.status(403).json({ success: false, error: "Access Denied" });
+    }
+
     const userIp = req.ip || req.connection.remoteAddress;
     const now = Date.now();
 
+    // Nếu IP này đang có 1 key chưa hết hạn -> Trả về luôn key đó
     if (ipToKey.has(userIp)) {
         const existingData = ipToKey.get(userIp);
         if (now < existingData.expiresAt) {
-            return res.json({ 
-                success: true, 
-                key: existingData.key, 
-                expiresAt: existingData.expiresAt 
-            });
+            return res.json({ success: true, key: existingData.key, expiresAt: existingData.expiresAt });
         }
     }
 
+    // Tạo Key mới: Vantablack_ + 15 ký tự
     let newKey;
-    let isUnique = false;
-    while (!isUnique) {
+    do {
         newKey = 'Vantablack_' + generateRandomString(15);
-        if (!activeKeys.has(newKey)) {
-            isUnique = true;
-        }
-    }
+    } while (activeKeys.has(newKey));
     
-    const expiresAt = now + KEY_EXPIRATION_MS; // Hết hạn sau 24 tiếng
+    const expiresAt = now + KEY_EXPIRATION_MS; 
     
     activeKeys.set(newKey, expiresAt);
     ipToKey.set(userIp, { key: newKey, expiresAt: expiresAt });
@@ -247,7 +271,7 @@ app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
     res.json({ success: true, key: newKey, expiresAt: expiresAt });
 });
 
-// 4. API XÁC NHẬN KEY TỪ LUA
+// Lua script gọi vào đây để check
 app.get('/api/verify-key/:key', (req, res) => {
     const userKey = req.params.key;
     const now = Date.now();
@@ -265,16 +289,8 @@ app.get('/api/verify-key/:key', (req, res) => {
     }
 });
 
-// Middleware
-function secureApiMiddleware(req, res, next) {
-    if (req.headers['x-vantablack-auth'] === 'true_secure_request') {
-        next();
-    } else {
-        res.status(403).json({ success: false, error: "Access Denied" });
-    }
-}
-
+// Chống sập server nếu có lỗi nhỏ
 process.on('uncaughtException', (err) => console.log('Error:', err));
 process.on('unhandledRejection', (err) => console.log('Rejection:', err));
 
-app.listen(port, () => console.log(`Vantablack Server running on port ${port}`));
+app.listen(port, () => console.log('Vantablack Server running on port ' + port));
