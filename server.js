@@ -19,13 +19,15 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // ==========================================
-// BỘ NHỚ KEY & HWID (HẠN 24 GIỜ)
+// BỘ NHỚ KEY & HWID
 // ==========================================
-const activeKeys = new Map(); // Lưu: Key -> { hwid, expiresAt }
-const hwidToKey = new Map();  // Lưu: HWID -> { key, expiresAt }
-const KEY_EXPIRATION_MS = 24 * 60 * 60 * 1000; 
+const activeKeys = new Map(); // Dành cho Game (Lưu: Key -> { hwid, expiresAt })
+const hwidToKey = new Map();  // Dành cho Web (Lưu: HWID -> { key, expiresAt, pageExpiresAt })
 
-// Dọn dẹp key hết hạn
+const KEY_EXPIRATION_MS = 24 * 60 * 60 * 1000; // Key dùng trong game: 24 giờ
+const PAGE_EXPIRATION_MS = 5 * 60 * 1000;      // Web tự hủy sau: 5 phút
+
+// Dọn dẹp bộ nhớ định kỳ (Chỉ xóa khi Key 24h đã hết hạn)
 setInterval(() => {
     const now = Date.now();
     for (const [key, data] of activeKeys.entries()) {
@@ -49,8 +51,8 @@ function generateRandomString(length) {
 // GIAO DIỆN WEB HTML
 // ==========================================
 app.get('/', (req, res) => {
-    // BẮT BUỘC PHẢI CÓ HWID TRÊN THANH ĐỊA CHỈ TỪ GAME TRUYỀN LÊN
     const clientHwid = req.query.hwid;
+    const now = Date.now();
     
     if (!clientHwid) {
         return res.send(`
@@ -61,43 +63,98 @@ app.get('/', (req, res) => {
         `);
     }
 
+    // KIỂM TRA TRẠNG THÁI CỦA HWID NÀY
+    let hasActiveKey = false;
+    let prefillKey = "";
+    let pageExpiresAt = 0;
+
+    if (hwidToKey.has(clientHwid)) {
+        const data = hwidToKey.get(clientHwid);
+        
+        // Nếu Key 24h vẫn còn hạn
+        if (now < data.expiresAt) {
+            // Kiểm tra xem trang web 5 phút đã hết hạn chưa?
+            if (now > data.pageExpiresAt) {
+                // TRẢ VỀ 404 NẾU QUÁ 5 PHÚT
+                return res.status(404).send(`
+                    <body style="background:#1a1a1a; color:#ff4444; font-family:monospace; text-align:center; padding-top:100px;">
+                        <h1>404 - TRANG ĐÃ TỰ HỦY</h1>
+                        <p>Thời gian 5 phút xem Key đã kết thúc để bảo mật.</p>
+                        <p>Key của bạn vẫn <b>đang hoạt động trong Game</b>.</p>
+                        <p style="color:#888;">(Vui lòng chờ hết hạn 24h để lấy Key mới nếu bạn làm mất Key cũ)</p>
+                    </body>
+                `);
+            } else {
+                // Chưa hết 5 phút -> Cho phép hiển thị lại Key cũ
+                hasActiveKey = true;
+                prefillKey = data.key;
+                pageExpiresAt = data.pageExpiresAt;
+            }
+        }
+    }
+
+    // RENDER HTML TĨNH (SẼ ĐƯỢC JS BÊN TRONG XỬ LÝ)
     res.send(`
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Vantablack Hub - HWID Key System</title>
+        <title>Vantablack Hub - Secure Key</title>
         <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
         <style>
             body { background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: 'Press Start 2P', cursive; }
-            .container { text-align: center; background: rgba(0, 0, 0, 0.2); padding: 40px; border-radius: 10px; border: 4px solid #fff; }
-            h1 { color: #ffffff; font-size: 28px; text-shadow: 4px 4px 0px #000, 6px 6px 0px #444; margin-bottom: 10px; line-height: 1.5; }
-            .hwid-text { font-size: 8px; color: #ccc; margin-bottom: 20px; word-wrap: break-word; max-width: 300px; }
-            .key-display { background-color: #fff; padding: 15px; font-size: 14px; color: #000; border: 4px solid #000; margin-bottom: 20px; min-width: 320px; height: 20px; word-wrap: break-word; }
-            .timer-display { color: #ffeb3b; font-size: 12px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; display: none; }
+            .container { text-align: center; background: rgba(0, 0, 0, 0.2); padding: 40px; border-radius: 10px; border: 4px solid #fff; max-width: 90%; }
+            h1 { color: #ffffff; font-size: 24px; text-shadow: 4px 4px 0px #000; margin-bottom: 10px; line-height: 1.5; }
+            .hwid-text { font-size: 8px; color: #ccc; margin-bottom: 20px; word-wrap: break-word; }
+            .key-display { background-color: #fff; padding: 15px; font-size: 14px; color: #000; border: 4px solid #000; margin-bottom: 10px; min-width: 320px; height: 20px; display: flex; align-items: center; justify-content: center; }
+            
+            .warning-text { color: #ffeb3b; font-size: 9px; margin-bottom: 20px; text-shadow: 1px 1px 0px #000; line-height: 1.5; }
+            .timer-display { color: #ff4444; font-size: 14px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; }
+            
             button { background-color: #4CAF50; color: white; border: 4px solid #000; padding: 15px 20px; font-family: 'Press Start 2P', cursive; font-size: 12px; cursor: pointer; margin: 5px; box-shadow: 4px 4px 0px #000; transition: all 0.1s; }
             button:active { box-shadow: 0px 0px 0px #000; transform: translate(4px, 4px); }
             button:disabled { background-color: #555; cursor: not-allowed; box-shadow: none; transform: none; }
-            #copyBtn { background-color: #2196F3; display: none; }
+            
+            #copyBtn { background-color: #2196F3; }
         </style>
     </head>
-    <body>
-        <div class="container">
+    <body id="mainBody">
+        <div class="container" id="mainContainer">
             <h1>Vantablack Hub</h1>
             <div class="hwid-text">Target HWID: ${clientHwid.substring(0, 15)}...</div>
-            <div id="timerBox" class="timer-display">Expires in: 24:00:00</div>
+            
+            <div id="warningBox" class="warning-text" style="display: none;">
+                ⚠️ LƯU Ý: HÃY COPY VÀ LƯU LẠI KEY NGAY!<br><br>
+                Trang web này sẽ tự hủy vĩnh viễn sau:
+            </div>
+            <div id="timerBox" class="timer-display" style="display: none;">05:00</div>
+            
             <div id="keyBox" class="key-display">Click Generate...</div>
+            
             <div>
                 <button id="genBtn" onclick="generateKey()">Generate Key</button>
-                <button id="copyBtn" onclick="copyKey()">Copy Key</button>
+                <button id="copyBtn" onclick="copyKey()" style="display: none;">Copy Key</button>
             </div>
         </div>
 
         <script>
+            const myHwid = "${clientHwid}";
             let currentKey = "";
             let timerInterval;
-            const myHwid = "${clientHwid}"; // Lấy HWID từ Server gán vào JavaScript
+
+            // KIỂM TRA XEM SERVER CÓ BÁO LÀ ĐÃ CÓ KEY CHƯA
+            const hasActiveKey = ${hasActiveKey};
+            
+            if (hasActiveKey) {
+                currentKey = "${prefillKey}";
+                document.getElementById('keyBox').innerText = currentKey;
+                document.getElementById('genBtn').style.display = 'none';
+                document.getElementById('copyBtn').style.display = 'inline-block';
+                document.getElementById('warningBox').style.display = 'block';
+                document.getElementById('timerBox').style.display = 'block';
+                startSelfDestructTimer(${pageExpiresAt});
+            }
 
             async function generateKey() {
                 const keyBox = document.getElementById('keyBox');
@@ -109,7 +166,7 @@ app.get('/', (req, res) => {
                     const response = await fetch('/api/generate-key', {
                         headers: { 
                             'x-vantablack-auth': 'true_secure_request',
-                            'x-hwid': myHwid // Gửi HWID ngầm lên cho API tạo key
+                            'x-hwid': myHwid
                         }
                     });
                     const data = await response.json();
@@ -119,8 +176,10 @@ app.get('/', (req, res) => {
                         keyBox.innerText = currentKey;
                         genBtn.style.display = 'none';
                         document.getElementById('copyBtn').style.display = 'inline-block';
+                        document.getElementById('warningBox').style.display = 'block';
                         document.getElementById('timerBox').style.display = 'block';
-                        startTimer(data.expiresAt);
+                        
+                        startSelfDestructTimer(data.pageExpiresAt);
                     } else {
                         keyBox.innerText = data.error || "Error!";
                         genBtn.disabled = false;
@@ -131,7 +190,7 @@ app.get('/', (req, res) => {
                 }
             }
 
-            function startTimer(expireTime) {
+            function startSelfDestructTimer(expireTime) {
                 const timerBox = document.getElementById('timerBox');
                 clearInterval(timerInterval);
                 
@@ -141,16 +200,19 @@ app.get('/', (req, res) => {
                     
                     if (timeLeft <= 0) {
                         clearInterval(timerInterval);
-                        timerBox.innerText = "Key Expired!";
-                        document.getElementById('genBtn').style.display = 'inline-block';
-                        document.getElementById('genBtn').disabled = false;
-                        document.getElementById('copyBtn').style.display = 'none';
-                        document.getElementById('keyBox').innerText = "Click Generate...";
+                        // KHI HẾT 5 PHÚT -> ĐỔI GIAO DIỆN THÀNH 404 TRỰC TIẾP
+                        document.getElementById('mainBody').style.background = "#1a1a1a";
+                        document.getElementById('mainBody').innerHTML = \`
+                            <div style="color:#ff4444; font-family:monospace; text-align:center; padding-top:100px;">
+                                <h1 style="text-shadow: none;">404 - TRANG ĐÃ TỰ HỦY</h1>
+                                <p>Thời gian 5 phút xem Key đã kết thúc để bảo mật.</p>
+                                <p>Key của bạn vẫn <b>đang hoạt động trong Game</b>.</p>
+                            </div>
+                        \`;
                     } else {
-                        const hours = Math.floor(timeLeft / 3600).toString().padStart(2, '0');
-                        const minutes = Math.floor((timeLeft % 3600) / 60).toString().padStart(2, '0');
+                        const minutes = Math.floor(timeLeft / 60).toString().padStart(2, '0');
                         const seconds = (timeLeft % 60).toString().padStart(2, '0');
-                        timerBox.innerText = "Expires in: " + hours + ":" + minutes + ":" + seconds;
+                        timerBox.innerText = minutes + ":" + seconds;
                     }
                 }, 1000);
             }
@@ -175,41 +237,49 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// API XỬ LÝ LẤY KEY VÀ KIỂM TRA (VỚI HWID)
+// API XỬ LÝ LẤY KEY 
 // ==========================================
 app.get('/api/generate-key', (req, res) => {
     const clientHwid = req.headers['x-hwid'];
     
     if (req.headers['x-vantablack-auth'] !== 'true_secure_request' || !clientHwid) {
-        return res.status(403).json({ success: false, error: "Access Denied / Missing HWID" });
+        return res.status(403).json({ success: false, error: "Access Denied" });
     }
 
     const now = Date.now();
 
-    // Nếu HWID này đã có Key còn hạn, trả lại luôn key đó
+    // Nếu HWID này đã có Key còn hạn 24h
     if (hwidToKey.has(clientHwid)) {
         const existingData = hwidToKey.get(clientHwid);
         if (now < existingData.expiresAt) {
-            return res.json({ success: true, key: existingData.key, expiresAt: existingData.expiresAt });
+            if (now > existingData.pageExpiresAt) {
+                // Nếu đã qua 5 phút web
+                return res.status(403).json({ success: false, error: "Web page expired (404)" });
+            }
+            // Trả về Key cũ đang dùng
+            return res.json({ success: true, key: existingData.key, pageExpiresAt: existingData.pageExpiresAt });
         }
     }
 
-    // Tạo Key mới
+    // TẠO KEY MỚI NẾU CHƯA CÓ HOẶC ĐÃ HẾT HẠN 24H
     let newKey;
     do { newKey = 'Vantablack_' + generateRandomString(15); } while (activeKeys.has(newKey));
     
-    const expiresAt = now + KEY_EXPIRATION_MS; 
+    const expiresAt = now + KEY_EXPIRATION_MS;    // 24 Giờ cho game
+    const pageExpiresAt = now + PAGE_EXPIRATION_MS; // 5 Phút tự hủy web
     
     activeKeys.set(newKey, { hwid: clientHwid, expiresAt: expiresAt });
-    hwidToKey.set(clientHwid, { key: newKey, expiresAt: expiresAt });
+    hwidToKey.set(clientHwid, { key: newKey, expiresAt: expiresAt, pageExpiresAt: pageExpiresAt });
     
-    res.json({ success: true, key: newKey, expiresAt: expiresAt });
+    res.json({ success: true, key: newKey, pageExpiresAt: pageExpiresAt });
 });
 
-// LUA GỌI API NÀY KÈM THEO HWID ĐỂ CHECK
+// ==========================================
+// API KIỂM TRA KEY (ROBLOX LUA GỌI VÀO ĐÂY)
+// ==========================================
 app.get('/api/verify-key/:key', (req, res) => {
     const userKey = req.params.key;
-    const luaHwid = req.query.hwid; // Lấy HWID mà Lua gửi lên
+    const luaHwid = req.query.hwid; 
     const now = Date.now();
 
     if (!luaHwid) return res.json({ valid: false, message: 'Missing HWID in request!' });
@@ -217,18 +287,17 @@ app.get('/api/verify-key/:key', (req, res) => {
     if (activeKeys.has(userKey)) {
         const keyData = activeKeys.get(userKey);
         
-        // KIỂM TRA HẠN
+        // KIỂM TRA HẠN 24 GIỜ
         if (now > keyData.expiresAt) {
             activeKeys.delete(userKey);
             return res.json({ valid: false, message: 'Key has expired!' });
         }
         
-        // KIỂM TRA HWID CÓ KHỚP VỚI LÚC TẠO KHÔNG?
+        // KIỂM TRA HWID (Chống share key)
         if (keyData.hwid !== luaHwid) {
             return res.json({ valid: false, message: 'HWID Mismatch! Bạn không thể xài key của người khác.' });
         }
 
-        // Hợp lệ 100%
         res.json({ valid: true, message: 'Key is valid!' });
     } else {
         res.json({ valid: false, message: 'Invalid key!' });
