@@ -94,7 +94,7 @@ app.get('/fake-linkvertise', (req, res) => {
     res.redirect('/hub');
 });
 
-// 3. TRANG TẠO KEY CHÍNH THỨC (ĐÃ FIX CAPTCHA)
+// 3. TRANG TẠO KEY CHÍNH THỨC (ĐÃ XÓA CAPTCHA)
 app.get('/hub', (req, res) => {
     if (req.cookies.vantablack_auth !== 'passed_link') {
         return res.status(403).send("Access Denied: Vui lòng vượt link trước!");
@@ -102,17 +102,15 @@ app.get('/hub', (req, res) => {
 
     const htmlContent = `
     <!DOCTYPE html>
-    <!-- THÊM translate="no" ĐỂ CHỐNG GOOGLE DỊCH LÀM HỎNG CAPTCHA -->
-    <html lang="en" translate="no" class="notranslate">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="google" content="notranslate">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>Vantablack Hub - Key System</title>
         <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
         <style>
             body { background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: 'Press Start 2P', cursive; overflow: hidden; }
-            #mainContainer { display: none; text-align: center; background: rgba(0, 0, 0, 0.2); padding: 40px; border-radius: 10px; border: 4px solid #fff; }
+            #mainContainer { display: flex; flex-direction: column; align-items: center; text-align: center; background: rgba(0, 0, 0, 0.2); padding: 40px; border-radius: 10px; border: 4px solid #fff; }
             h1 { color: #ffffff; font-size: 32px; text-shadow: 4px 4px 0px #000, 6px 6px 0px #444; margin-bottom: 40px; line-height: 1.5; }
             .key-display { background-color: #fff; padding: 15px; font-size: 14px; color: #000; border: 4px solid #000; margin-bottom: 20px; min-width: 300px; height: 20px; word-wrap: break-word; }
             .timer-display { color: #ffeb3b; font-size: 12px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; display: none;}
@@ -120,60 +118,9 @@ app.get('/hub', (req, res) => {
             button.action-btn:active:not(:disabled) { box-shadow: 0px 0px 0px #000; transform: translate(4px, 4px); }
             button.action-btn:disabled { background-color: #555; cursor: not-allowed; box-shadow: none; transform: none;}
             #copyBtn { background-color: #2196F3; display: none; }
-            
-            #captchaContainer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; }
-            #captchaTitle { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; line-height: 1.5; }
-            
-            /* ĐÃ FIX ĐỂ KHUNG KHÔNG BAO GIỜ BỊ XẸP VÀ CHỮ HIỂN THỊ CHUẨN */
-            #captchaDisplay {
-                background: #fff;
-                color: #000;
-                padding: 10px 20px;
-                font-family: monospace; /* Dùng font hệ thống để tránh lỗi load font pixel */
-                font-size: 32px;
-                font-weight: bold;
-                border: 4px solid #000;
-                margin-bottom: 20px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-width: 150px;
-                min-height: 50px;
-                background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,0.1) 5px, rgba(0,0,0,0.1) 10px);
-                user-select: none;
-                -webkit-user-select: none;
-                pointer-events: none; 
-            }
-            
-            #captchaInput {
-                padding: 15px;
-                font-size: 14px;
-                font-family: 'Press Start 2P', cursive;
-                border: 4px solid #000;
-                margin-bottom: 15px;
-                text-align: center;
-                text-transform: uppercase;
-                width: 250px;
-                box-sizing: border-box;
-            }
-            #captchaInput:focus { outline: none; border-color: #ffeb3b; }
-            
-            #verifyBtn { background-color: #28a745; color: white; border: 4px solid #000; padding: 15px 20px; font-family: 'Press Start 2P', cursive; font-size: 12px; cursor: pointer; box-shadow: 4px 4px 0px #000; }
-            #verifyBtn:active { box-shadow: 0px 0px 0px #000; transform: translate(4px, 4px); }
-            
-            #captchaError { color: #ff3333; font-size: 10px; margin-top: 15px; min-height: 12px; text-shadow: 1px 1px 0px #000; }
         </style>
     </head>
     <body>
-        <div id="captchaContainer">
-            <div id="captchaTitle">Xác minh bạn là người thật<br><br>Nhập mã bên dưới</div>
-            <!-- KHUNG HIỂN THỊ MÃ -->
-            <div id="captchaDisplay" oncontextmenu="return false;" onmousedown="return false;"></div>
-            <input type="text" id="captchaInput" placeholder="Nhập mã..." autocomplete="off" spellcheck="false">
-            <button id="verifyBtn" onclick="checkCaptcha()">Xác nhận</button>
-            <div id="captchaError"></div>
-        </div>
-
         <div class="container" id="mainContainer">
             <h1>Vantablack Hub</h1>
             <div id="timerBox" class="timer-display">Expires in: 24:00:00</div>
@@ -185,54 +132,9 @@ app.get('/hub', (req, res) => {
         </div>
 
         <script>
-            let currentCaptchaText = "";
-
-            function renderCaptcha() {
-                const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; 
-                const length = Math.floor(Math.random() * 4) + 4; // Độ dài 4-7
-                
-                currentCaptchaText = "";
-                let html = "";
-                
-                for(let i = 0; i < length; i++) {
-                    const char = chars.charAt(Math.floor(Math.random() * chars.length));
-                    currentCaptchaText += char;
-                    
-                    // Giảm góc vặn vẹo đi một xíu để nó không bị lẹm chữ ra ngoài khung
-                    const rotate = Math.floor(Math.random() * 40) - 20; 
-                    const scale = 0.9 + Math.random() * 0.3; 
-                    
-                    html += \`<span style="display:inline-block; transform: rotate(\${rotate}deg) scale(\${scale}); margin: 0 4px; color: #000;">\${char}</span>\`;
-                }
-                
-                document.getElementById('captchaDisplay').innerHTML = html;
-                document.getElementById('captchaInput').value = "";
-                document.getElementById('captchaError').innerText = "";
-            }
-
-            function checkCaptcha() {
-                const userInput = document.getElementById('captchaInput').value.trim().toUpperCase();
-                if(userInput === currentCaptchaText) {
-                    document.getElementById('captchaContainer').style.display = 'none';
-                    document.getElementById('mainContainer').style.display = 'block';
-                } else {
-                    document.getElementById('captchaError').innerText = "Mã sai! Vui lòng thử lại.";
-                    renderCaptcha(); 
-                }
-            }
-
-            document.getElementById('captchaInput').addEventListener('keypress', function (e) {
-                if (e.key === 'Enter') {
-                    checkCaptcha();
-                }
-            });
-
+            // Kiểm tra session hiện tại
             if(localStorage.getItem('vantablack_expire') && Date.now() < parseInt(localStorage.getItem('vantablack_expire'))) {
-                document.getElementById('captchaContainer').style.display = 'none';
-                document.getElementById('mainContainer').style.display = 'block';
                 resumeSession();
-            } else {
-                renderCaptcha(); 
             }
 
             let currentKey = "";
