@@ -2,15 +2,20 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
+const cors = require('cors'); // Thêm thư viện CORS
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 // ==========================================
-// CÀI ĐẶT BẢO MẬT
+// CÀI ĐẶT BẢO MẬT & RENDER PROXY
 // ==========================================
 app.use(helmet());
+app.use(cors());
 app.use(cookieParser());
+
+// BẮT BUỘC TRÊN RENDER: Để express-rate-limit nhận diện đúng IP thật của user
+// thay vì IP của Load Balancer trên Render.
 app.set('trust proxy', 1); 
 
 const generalLimiter = rateLimit({
@@ -50,6 +55,11 @@ function generateRandomString(length) {
 // ==========================================
 // API & ROUTES
 // ==========================================
+
+// ROUTE GIỮ STATE CHO RENDER (Chống sleep)
+app.get('/ping', (req, res) => {
+    res.status(200).send('OK');
+});
 
 // 1. TRANG CHỦ - YÊU CẦU VƯỢT LINK
 app.get('/', (req, res) => {
@@ -248,7 +258,6 @@ app.get('/hub', (req, res) => {
                         document.getElementById('copyBtn').style.display = 'none';
                         document.getElementById('keyBox').innerText = "Click Generate...";
                     } else {
-                        // Tính toán hiển thị 24 Giờ: Phút: Giây
                         const hours = Math.floor(timeLeft / 3600).toString().padStart(2, '0');
                         const minutes = Math.floor((timeLeft % 3600) / 60).toString().padStart(2, '0');
                         const seconds = (timeLeft % 60).toString().padStart(2, '0');
@@ -284,6 +293,7 @@ app.get('/hub', (req, res) => {
 
 // 4. API TẠO KEY (KHÓA IP + HẸN GIỜ 24H)
 app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
+    // Nhờ trust proxy = 1, Express sẽ lấy đúng IP thật ở đây
     const userIp = req.ip || req.connection.remoteAddress;
     const now = Date.now();
 
@@ -322,7 +332,6 @@ app.get('/api/verify-key/:key', (req, res) => {
 
     if (activeKeys.has(userKey)) {
         const expiresAt = activeKeys.get(userKey);
-        // Nếu Server thấy thời gian hiện tại VƯỢT QUÁ thời gian sống 24h của Key
         if (now > expiresAt) {
             activeKeys.delete(userKey);
             res.json({ valid: false, message: 'Key has expired!' });
@@ -346,4 +355,4 @@ function secureApiMiddleware(req, res, next) {
 process.on('uncaughtException', (err) => console.log('Error:', err));
 process.on('unhandledRejection', (err) => console.log('Rejection:', err));
 
-app.listen(port, () => console.log(\`Vantablack Server running on port \${port}\`));
+app.listen(port, () => console.log(`Vantablack Server running on port ${port}`));
