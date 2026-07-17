@@ -102,7 +102,6 @@ app.get('/hub', (req, res) => {
         return res.status(403).send("Access Denied: Vui lòng vượt link trước!");
     }
 
-    // ĐÃ GIỮ NGUYÊN 100% CẤU TRÚC GỐC VÀ CHỮ GỐC CỦA BẠN
     const htmlContent = `
     <!DOCTYPE html>
     <html lang="en">
@@ -122,7 +121,7 @@ app.get('/hub', (req, res) => {
             button.action-btn:disabled { background-color: #555; cursor: not-allowed; box-shadow: none; transform: none;}
             #copyBtn { background-color: #2196F3; display: none; }
             
-            /* CSS CAPTCHA GỐC + Thêm xíu disabled để tạo độ trễ */
+            /* CSS CAPTCHA GỐC */
             #captchaContainer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
             #captchaInfo { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; text-align: center; line-height: 1.5; pointer-events: none; }
             #captchaBtn { position: absolute; background-color: #28a745; color: white; border: 3px solid #000; padding: 10px; font-family: 'Press Start 2P', cursive; font-size: 14px; cursor: pointer; box-shadow: 3px 3px 0px #000; display: none; }
@@ -146,7 +145,7 @@ app.get('/hub', (req, res) => {
         </div>
 
         <script>
-            // --- CAPTCHA LOGIC CHỈ SỬA CÔNG THỨC TỌA ĐỘ ---
+            // --- CAPTCHA LOGIC: CHỈ XUẤT HIỆN Ở 2 VỊ TRÍ ---
             let captchaClicks = 0;
             const targetClicks = 3;
             const captchaBtn = document.getElementById('captchaBtn');
@@ -158,40 +157,39 @@ app.get('/hub', (req, res) => {
                 mainContainer.style.display = 'block';
                 resumeSession();
             } else {
-                setTimeout(moveCaptchaButton, 100); // Đợi xíu để load nút
+                setTimeout(moveCaptchaButton, 100); 
             }
 
             function moveCaptchaButton() {
                 captchaBtn.style.display = 'block';
                 
-                // Thuật toán đo đúng chiều rộng màn hình dù là điện thoại hay PC
                 const btnWidth = captchaBtn.offsetWidth || 40;
                 const btnHeight = captchaBtn.offsetHeight || 40;
                 
-                // Trừ đi kích thước thật của cái nút + 20px viền an toàn
-                const maxX = window.innerWidth - btnWidth - 20;
-                const maxY = window.innerHeight - btnHeight - 20;
-                const minX = 20; 
-                const minY = 100; 
+                // Chọn ngẫu nhiên 0 hoặc 1 (50% tỷ lệ mỗi vị trí)
+                const randomPos = Math.floor(Math.random() * 2);
+                let targetX, targetY;
+
+                if (randomPos === 0) {
+                    // Vị trí 1: Góc trên bên trái
+                    targetX = 20; 
+                    targetY = 20;
+                } else {
+                    // Vị trí 2: Ở giữa màn hình (đẩy xuống một chút để không đè lên chữ)
+                    targetX = (window.innerWidth - btnWidth) / 2;
+                    targetY = (window.innerHeight - btnHeight) / 2 + 100; 
+                }
                 
-                // Đảm bảo không bị lỗi số âm trên màn hình nhỏ
-                const safeMaxX = Math.max(minX, maxX);
-                const safeMaxY = Math.max(minY, maxY);
-                
-                let randomX = Math.floor(Math.random() * (safeMaxX - minX + 1)) + minX;
-                let randomY = Math.floor(Math.random() * (safeMaxY - minY + 1)) + minY;
-                
-                captchaBtn.style.left = randomX + 'px'; 
-                captchaBtn.style.top = randomY + 'px';
+                captchaBtn.style.left = targetX + 'px'; 
+                captchaBtn.style.top = targetY + 'px';
             }
 
             captchaBtn.addEventListener('click', function() {
-                if (this.disabled) return; // Chống bấm 2 lần liên tục
+                if (this.disabled) return; 
 
                 captchaClicks++;
                 document.getElementById('captchaCount').innerText = captchaClicks + '/' + targetClicks;
                 
-                // Đổi nút thành dấu tích xanh dương trong nửa giây để user biết đã nhấn ăn
                 this.innerHTML = "✅";
                 this.style.backgroundColor = "#2196F3";
                 this.disabled = true;
@@ -211,14 +209,13 @@ app.get('/hub', (req, res) => {
                 }
             });
 
-            // Nếu người dùng xoay ngang điện thoại, nút tự nhảy lại cho an toàn
             window.addEventListener('resize', () => {
                 if(captchaContainer.style.display !== 'none' && !captchaBtn.disabled) {
                     moveCaptchaButton();
                 }
             });
 
-            // --- KEY GENERATION & TIMER LOGIC (24H) - GIỮ NGUYÊN GỐC 100% ---
+            // --- KEY GENERATION & TIMER LOGIC (GIỮ NGUYÊN GỐC 100%) ---
             let currentKey = "";
             let timerInterval;
 
