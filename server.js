@@ -2,7 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
-const cors = require('cors'); // Thêm thư viện CORS
+const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -13,9 +13,6 @@ const port = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(cookieParser());
-
-// BẮT BUỘC TRÊN RENDER: Để express-rate-limit nhận diện đúng IP thật của user
-// thay vì IP của Load Balancer trên Render.
 app.set('trust proxy', 1); 
 
 const generalLimiter = rateLimit({
@@ -29,10 +26,8 @@ app.use('/', generalLimiter);
 // ==========================================
 const activeKeys = new Map(); 
 const ipToKey = new Map();    
-// 24 Giờ = 24 * 60 * 60 * 1000 mili-giây
 const KEY_EXPIRATION_MS = 24 * 60 * 60 * 1000; 
 
-// Dọn dẹp Key hết hạn (Chạy mỗi 15 phút)
 setInterval(() => {
     const now = Date.now();
     for (const [key, expiresAt] of activeKeys.entries()) {
@@ -56,7 +51,6 @@ function generateRandomString(length) {
 // API & ROUTES
 // ==========================================
 
-// ROUTE GIỮ STATE CHO RENDER (Chống sleep)
 app.get('/ping', (req, res) => {
     res.status(200).send('OK');
 });
@@ -128,14 +122,15 @@ app.get('/hub', (req, res) => {
             
             /* CSS CAPTCHA */
             #captchaContainer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
-            #captchaInfo { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; text-align: center; line-height: 1.5; }
-            #captchaBtn { position: absolute; background-color: #28a745; color: white; border: 3px solid #000; padding: 10px; font-family: 'Press Start 2P', cursive; font-size: 14px; cursor: pointer; box-shadow: 3px 3px 0px #000; display: none; }
+            #captchaInfo { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; text-align: center; line-height: 1.5; pointer-events: none;}
+            #captchaBtn { position: absolute; background-color: #28a745; color: white; border: 3px solid #000; padding: 15px 20px; font-family: 'Press Start 2P', cursive; font-size: 12px; cursor: pointer; box-shadow: 4px 4px 0px #000; display: none; transition: background-color 0.2s; white-space: nowrap;}
+            #captchaBtn:disabled { cursor: default; transform: translate(4px, 4px); box-shadow: 0px 0px 0px #000; }
         </style>
     </head>
     <body>
         <div id="captchaContainer">
-            <div id="captchaInfo">Prove you are human!<br><br>Click the Check button 3 times.<br><br><span id="captchaCount">0/3</span></div>
-            <button id="captchaBtn">✔️</button>
+            <div id="captchaInfo">Chứng minh bạn là con người!<br><br>Tìm và click vào nút xác nhận.</div>
+            <button id="captchaBtn">✔️ Xác nhận (1/3)</button>
         </div>
 
         <div class="container" id="mainContainer">
@@ -156,31 +151,56 @@ app.get('/hub', (req, res) => {
             const captchaContainer = document.getElementById('captchaContainer');
             const mainContainer = document.getElementById('mainContainer');
             
+            // Kiểm tra xem đã có key còn hạn chưa, nếu có bỏ qua captcha
             if(localStorage.getItem('vantablack_expire') && Date.now() < parseInt(localStorage.getItem('vantablack_expire'))) {
                 captchaContainer.style.display = 'none';
                 mainContainer.style.display = 'block';
                 resumeSession();
             } else {
-                setTimeout(moveCaptchaButton, 1000);
+                // Hiển thị ngay lập tức khi vào trang
+                moveCaptchaButton();
             }
 
             function moveCaptchaButton() {
                 captchaBtn.style.display = 'block';
-                const maxX = window.innerWidth - captchaBtn.offsetWidth - 20;
-                const maxY = window.innerHeight - captchaBtn.offsetHeight - 20;
+                // Tính toán để nút không bị lẹm ra ngoài màn hình
+                const maxX = window.innerWidth - 250; 
+                const maxY = window.innerHeight - 100;
                 const minX = 20; const minY = 100; 
+                
                 let randomX = Math.floor(Math.random() * (maxX - minX + 1)) + minX;
                 let randomY = Math.floor(Math.random() * (maxY - minY + 1)) + minY;
-                captchaBtn.style.left = randomX + 'px'; captchaBtn.style.top = randomY + 'px';
+                
+                captchaBtn.style.left = randomX + 'px'; 
+                captchaBtn.style.top = randomY + 'px';
             }
 
-            captchaBtn.addEventListener('click', () => {
+            captchaBtn.addEventListener('click', function() {
+                // Chống spam click
+                if (this.disabled) return; 
+
                 captchaClicks++;
-                document.getElementById('captchaCount').innerText = captchaClicks + '/' + targetClicks;
+                
+                // 1. Đổi giao diện thành "Thành công"
+                this.innerHTML = "✅ Thành công!";
+                this.style.backgroundColor = "#2196F3"; // Đổi sang màu xanh dương
+                this.disabled = true; // Khóa nút tạm thời
+
                 if (captchaClicks >= targetClicks) {
-                    captchaContainer.style.display = 'none';
-                    mainContainer.style.display = 'block';
-                } else { moveCaptchaButton(); }
+                    // Đủ 3 lần -> Đợi 0.5s cho user nhìn thấy tích xanh rồi ẩn
+                    setTimeout(() => {
+                        captchaContainer.style.display = 'none';
+                        mainContainer.style.display = 'block';
+                    }, 500);
+                } else {
+                    // Chưa đủ -> Đợi 0.5s rồi di chuyển và reset lại nút
+                    setTimeout(() => {
+                        this.innerHTML = "✔️ Xác nhận (" + (captchaClicks + 1) + "/3)";
+                        this.style.backgroundColor = "#28a745"; // Trả lại màu xanh lá
+                        moveCaptchaButton(); // Di chuyển
+                        this.disabled = false; // Mở khóa nút
+                    }, 500);
+                }
             });
 
             // --- KEY GENERATION & TIMER LOGIC (24H) ---
@@ -293,7 +313,6 @@ app.get('/hub', (req, res) => {
 
 // 4. API TẠO KEY (KHÓA IP + HẸN GIỜ 24H)
 app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
-    // Nhờ trust proxy = 1, Express sẽ lấy đúng IP thật ở đây
     const userIp = req.ip || req.connection.remoteAddress;
     const now = Date.now();
 
@@ -317,7 +336,7 @@ app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
         }
     }
     
-    const expiresAt = now + KEY_EXPIRATION_MS; // Hết hạn sau 24 tiếng
+    const expiresAt = now + KEY_EXPIRATION_MS; 
     
     activeKeys.set(newKey, expiresAt);
     ipToKey.set(userIp, { key: newKey, expiresAt: expiresAt });
