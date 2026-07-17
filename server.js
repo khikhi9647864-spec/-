@@ -2,7 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
-const cors = require('cors'); // Vẫn giữ cors để chạy được trên Render
+const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -51,12 +51,11 @@ function generateRandomString(length) {
 // API & ROUTES
 // ==========================================
 
-// Route giữ cho Render không bị ngủ
 app.get('/ping', (req, res) => {
     res.status(200).send('OK');
 });
 
-// 1. TRANG CHỦ - YÊU CẦU VƯỢT LINK
+// 1. TRANG CHỦ
 app.get('/', (req, res) => {
     if (req.cookies.vantablack_auth === 'passed_link') {
         return res.redirect('/hub');
@@ -90,13 +89,12 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
-// 2. ROUTE XÁC NHẬN VƯỢT LINK 
 app.get('/fake-linkvertise', (req, res) => {
     res.cookie('vantablack_auth', 'passed_link', { maxAge: 15 * 60 * 1000, httpOnly: true });
     res.redirect('/hub');
 });
 
-// 3. TRANG TẠO KEY CHÍNH THỨC
+// 3. TRANG TẠO KEY CHÍNH THỨC (ĐÃ FIX CAPTCHA)
 app.get('/hub', (req, res) => {
     if (req.cookies.vantablack_auth !== 'passed_link') {
         return res.status(403).send("Access Denied: Vui lòng vượt link trước!");
@@ -104,9 +102,11 @@ app.get('/hub', (req, res) => {
 
     const htmlContent = `
     <!DOCTYPE html>
-    <html lang="en">
+    <!-- THÊM translate="no" ĐỂ CHỐNG GOOGLE DỊCH LÀM HỎNG CAPTCHA -->
+    <html lang="en" translate="no" class="notranslate">
     <head>
         <meta charset="UTF-8">
+        <meta name="google" content="notranslate">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>Vantablack Hub - Key System</title>
         <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -121,24 +121,27 @@ app.get('/hub', (req, res) => {
             button.action-btn:disabled { background-color: #555; cursor: not-allowed; box-shadow: none; transform: none;}
             #copyBtn { background-color: #2196F3; display: none; }
             
-            /* CSS CAPTCHA MỚI CHỐNG COPY, VẶN VẸO */
             #captchaContainer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #808080; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; }
             #captchaTitle { color: white; font-size: 16px; margin-bottom: 20px; text-shadow: 2px 2px 0px #000; line-height: 1.5; }
             
+            /* ĐÃ FIX ĐỂ KHUNG KHÔNG BAO GIỜ BỊ XẸP VÀ CHỮ HIỂN THỊ CHUẨN */
             #captchaDisplay {
                 background: #fff;
                 color: #000;
-                padding: 15px 25px;
-                font-size: 24px;
+                padding: 10px 20px;
+                font-family: monospace; /* Dùng font hệ thống để tránh lỗi load font pixel */
+                font-size: 32px;
+                font-weight: bold;
                 border: 4px solid #000;
                 margin-bottom: 20px;
-                display: inline-block;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 150px;
+                min-height: 50px;
                 background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,0.1) 5px, rgba(0,0,0,0.1) 10px);
-                /* Chống bôi đen, copy, chuột phải */
                 user-select: none;
                 -webkit-user-select: none;
-                -moz-user-select: none;
-                -ms-user-select: none;
                 pointer-events: none; 
             }
             
@@ -162,12 +165,12 @@ app.get('/hub', (req, res) => {
         </style>
     </head>
     <body>
-        <!-- GIAO DIỆN CAPTCHA MỚI -->
         <div id="captchaContainer">
-            <div id="captchaTitle">Verify you are human<br>Type the code below</div>
+            <div id="captchaTitle">Xác minh bạn là người thật<br><br>Nhập mã bên dưới</div>
+            <!-- KHUNG HIỂN THỊ MÃ -->
             <div id="captchaDisplay" oncontextmenu="return false;" onmousedown="return false;"></div>
-            <input type="text" id="captchaInput" placeholder="Enter code..." autocomplete="off" spellcheck="false">
-            <button id="verifyBtn" onclick="checkCaptcha()">Confirm</button>
+            <input type="text" id="captchaInput" placeholder="Nhập mã..." autocomplete="off" spellcheck="false">
+            <button id="verifyBtn" onclick="checkCaptcha()">Xác nhận</button>
             <div id="captchaError"></div>
         </div>
 
@@ -182,14 +185,11 @@ app.get('/hub', (req, res) => {
         </div>
 
         <script>
-            // --- LOGIC CAPTCHA MỚI ---
             let currentCaptchaText = "";
 
             function renderCaptcha() {
-                // Ký tự ngẫu nhiên (Bỏ I, O để tránh nhầm với 1, 0)
-                const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
-                // Độ dài ngẫu nhiên từ 4 đến 7
-                const length = Math.floor(Math.random() * 4) + 4; 
+                const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; 
+                const length = Math.floor(Math.random() * 4) + 4; // Độ dài 4-7
                 
                 currentCaptchaText = "";
                 let html = "";
@@ -198,12 +198,11 @@ app.get('/hub', (req, res) => {
                     const char = chars.charAt(Math.floor(Math.random() * chars.length));
                     currentCaptchaText += char;
                     
-                    // Tạo hiệu ứng vặn vẹo ngẫu nhiên cho từng chữ cái
-                    const rotate = Math.floor(Math.random() * 60) - 30; // Góc xoay -30 đến 30 độ
-                    const scale = 0.8 + Math.random() * 0.5; // Kích thước 0.8x đến 1.3x
-                    const margin = Math.random() * 4; // Khoảng cách ngẫu nhiên
+                    // Giảm góc vặn vẹo đi một xíu để nó không bị lẹm chữ ra ngoài khung
+                    const rotate = Math.floor(Math.random() * 40) - 20; 
+                    const scale = 0.9 + Math.random() * 0.3; 
                     
-                    html += \`<span style="display:inline-block; transform: rotate(\${rotate}deg) scale(\${scale}); margin: 0 \${margin}px;">\${char}</span>\`;
+                    html += \`<span style="display:inline-block; transform: rotate(\${rotate}deg) scale(\${scale}); margin: 0 4px; color: #000;">\${char}</span>\`;
                 }
                 
                 document.getElementById('captchaDisplay').innerHTML = html;
@@ -217,29 +216,25 @@ app.get('/hub', (req, res) => {
                     document.getElementById('captchaContainer').style.display = 'none';
                     document.getElementById('mainContainer').style.display = 'block';
                 } else {
-                    document.getElementById('captchaError').innerText = "Wrong code! Try again.";
-                    renderCaptcha(); // Sinh mã mới nếu sai
+                    document.getElementById('captchaError').innerText = "Mã sai! Vui lòng thử lại.";
+                    renderCaptcha(); 
                 }
             }
 
-            // Gắn phím Enter cho ô nhập
             document.getElementById('captchaInput').addEventListener('keypress', function (e) {
                 if (e.key === 'Enter') {
                     checkCaptcha();
                 }
             });
 
-            // Kiểm tra session hiện tại (Bỏ qua Captcha nếu Key vẫn đang còn hạn)
             if(localStorage.getItem('vantablack_expire') && Date.now() < parseInt(localStorage.getItem('vantablack_expire'))) {
                 document.getElementById('captchaContainer').style.display = 'none';
                 document.getElementById('mainContainer').style.display = 'block';
                 resumeSession();
             } else {
-                renderCaptcha(); // Khởi tạo Captcha khi mới vào
+                renderCaptcha(); 
             }
 
-
-            // --- KEY GENERATION & TIMER LOGIC (GIỮ NGUYÊN GỐC 100%) ---
             let currentKey = "";
             let timerInterval;
 
@@ -347,7 +342,7 @@ app.get('/hub', (req, res) => {
     res.send(htmlContent);
 });
 
-// 4. API TẠO KEY (KHÓA IP + HẸN GIỜ 24H)
+// 4. API TẠO KEY
 app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
     const userIp = req.ip || req.connection.remoteAddress;
     const now = Date.now();
@@ -380,7 +375,7 @@ app.get('/api/generate-key', secureApiMiddleware, (req, res) => {
     res.json({ success: true, key: newKey, expiresAt: expiresAt });
 });
 
-// 5. API XÁC NHẬN KEY TỪ LUA
+// 5. API XÁC NHẬN KEY
 app.get('/api/verify-key/:key', (req, res) => {
     const userKey = req.params.key;
     const now = Date.now();
@@ -398,7 +393,6 @@ app.get('/api/verify-key/:key', (req, res) => {
     }
 });
 
-// Middleware
 function secureApiMiddleware(req, res, next) {
     if (req.headers['x-vantablack-auth'] === 'true_secure_request') {
         next();
